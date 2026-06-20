@@ -158,6 +158,25 @@
       transition: width .6s ease, background .6s ease;
     }
 
+    /* ── Confidence badge ── */
+    .conf-badge {
+      display:inline-block;
+      font-size:.7rem;font-weight:700;
+      letter-spacing:.07em;text-transform:uppercase;
+      padding:3px 10px;border-radius:6px;margin-left:8px;
+      vertical-align:middle;
+    }
+    .conf-VERY-HIGH { background:rgba(0,201,135,.2);color:var(--green); }
+    .conf-HIGH      { background:rgba(77,166,255,.2);color:var(--blue);  }
+    .conf-MEDIUM    { background:rgba(245,166,35,.2);color:var(--yellow);}
+    .conf-LOW       { background:rgba(85,85,85,.2);  color:var(--muted); }
+
+    /* ── Flags ── */
+    .flag-item {
+      font-size:.75rem;color:var(--yellow);
+      padding:5px 0;border-bottom:1px solid var(--border);
+    }
+
     /* ── Indicators ── */
     .ind-grid {
       display: grid;
@@ -341,6 +360,9 @@
 
     /* ── Indicators ── */
     function indicatorsHtml(sig) {
+      const volPct = sig.volume_ma ? ((sig.volume - sig.volume_ma) / sig.volume_ma * 100).toFixed(0) : null;
+      const volColor = volPct > 10 ? 'var(--green)' : volPct < -30 ? 'var(--red)' : 'var(--text)';
+      const adxColor = sig.adx > 30 ? 'var(--green)' : sig.adx > 20 ? 'var(--yellow)' : 'var(--red)';
       return `
         <div class="card-title">Indicators</div>
         <div class="ind-grid">
@@ -348,8 +370,12 @@
           <div class="ind-item"><span class="k">ATR (14)</span><span class="v">${sig.atr}</span></div>
           <div class="ind-item"><span class="k">EMA 9</span><span class="v">${sig.ema9}</span></div>
           <div class="ind-item"><span class="k">EMA 21</span><span class="v">${sig.ema21}</span></div>
+          <div class="ind-item"><span class="k">EMA 50</span><span class="v">${sig.ema50}</span></div>
+          <div class="ind-item"><span class="k">ADX</span><span class="v" style="color:${adxColor}">${sig.adx} ${sig.trending ? '(trending)' : '(ranging)'}</span></div>
           <div class="ind-item"><span class="k">MACD</span><span class="v">${sig.macd}</span></div>
           <div class="ind-item"><span class="k">Signal</span><span class="v">${sig.macd_signal}</span></div>
+          <div class="ind-item"><span class="k">Volume</span><span class="v" style="color:${volColor}">${sig.volume?.toFixed(0)} ${volPct !== null ? (volPct > 0 ? '+' : '') + volPct + '% vs MA' : ''}</span></div>
+          <div class="ind-item"><span class="k">Candle</span><span class="v" style="color:${sig.candle === 'BULL' ? 'var(--green)' : sig.candle === 'BEAR' ? 'var(--red)' : 'var(--muted)'}">${sig.candle || 'None'}</span></div>
         </div>`;
     }
 
@@ -387,9 +413,9 @@
                 <div class="sub">current close</div>
               </div>
               <div class="pbox rr">
-                <div class="lbl">Score</div>
-                <div class="val">${sig.score > 0 ? "+" : ""}${sig.score} / 5</div>
-                <div class="sub">${sig.signal === "HOLD" ? "waiting for edge" : "signal fired"}</div>
+                <div class="lbl">Score / Confidence</div>
+                <div class="val">${sig.score > 0 ? "+" : ""}${sig.score} / ${sig.max_score || 8}</div>
+                <div class="sub">${sig.confidence || '—'}</div>
               </div>
               <div class="pbox sl">
                 <div class="lbl">Stop-Loss</div>
