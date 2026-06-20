@@ -283,7 +283,7 @@ def generate_signal(candles):
     elif rsi and rsi > RSI_OVERBOUGHT:
         scores.append(-1); reasons.append(f"RSI {rsi:.1f} — overbought")
     else:
-        scores.append(0);  reasons.append(f"RSI {rsi:.1f if rsi else '—'} — neutral")
+        scores.append(0);  reasons.append(f"RSI {round(rsi,1) if rsi else '—'} — neutral")
 
     # ── 4. MACD histogram momentum ───────────────────────────────────────────
     if mhst and mhst_prev and mhst > 0 and mhst > mhst_prev:
@@ -330,7 +330,7 @@ def generate_signal(candles):
     # ── ADX regime filter ────────────────────────────────────────────────────
     trending = adx and adx > MIN_ADX
     if not trending:
-        flags.append(f"ADX {adx:.1f if adx else '—'} < {MIN_ADX} — ranging market, signal suppressed")
+        flags.append(f"ADX {round(adx,1) if adx else '—'} < {MIN_ADX} — ranging market, signal suppressed")
 
     # ── Direction decision ───────────────────────────────────────────────────
     if total >= MIN_SCORE and trending:
