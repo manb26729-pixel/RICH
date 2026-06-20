@@ -40,7 +40,7 @@ INTERVAL_HTF = "1h"
 LIMIT        = 200
 SL_ATR_MULT  = 1.5
 TP_ATR_MULT  = 3.0
-MIN_ADX      = 20
+MIN_RR       = 1.8   # minimum risk/reward enforced on every signal
 MIN_SCORE    = 8      # out of 14
 POLL_SECONDS = 60
 ACCOUNT_SIZE_USDT  = 1000.0
@@ -412,12 +412,20 @@ def generate_signal(candles, htf_trend="FLAT", bid_pct=50.0, fng_val=50, fng_lab
 
     # ── SL/TP using S/R + ATR ─────────────────────────────────────────────────
     support, resistance = find_sr_levels(ind, n)
+    MIN_RR = 1.8  # enforce minimum risk/reward ratio
+
     if direction == "BUY":
-        sl = r2(support      if support      and support      > price - atr*2 else price - atr*SL_ATR_MULT)
-        tp = r2(resistance   if resistance   and resistance   < price + atr*5 else price + atr*TP_ATR_MULT)
+        sl = r2(support    if support    and support    > price - atr*2 else price - atr*SL_ATR_MULT)
+        sl_dist = abs(price - sl) if sl else atr * SL_ATR_MULT
+        min_tp  = price + sl_dist * MIN_RR
+        tp_sr   = resistance if resistance and resistance < price + atr*6 else None
+        tp = r2(tp_sr if tp_sr and tp_sr >= min_tp else min_tp)
     elif direction == "SELL":
-        sl = r2(resistance   if resistance   and resistance   < price + atr*2 else price + atr*SL_ATR_MULT)
-        tp = r2(support      if support      and support      > price - atr*5 else price - atr*TP_ATR_MULT)
+        sl = r2(resistance if resistance and resistance < price + atr*2 else price + atr*SL_ATR_MULT)
+        sl_dist = abs(sl - price) if sl else atr * SL_ATR_MULT
+        min_tp  = price - sl_dist * MIN_RR
+        tp_sr   = support if support and support > price - atr*6 else None
+        tp = r2(tp_sr if tp_sr and tp_sr <= min_tp else min_tp)
     else:
         sl = tp = None
 
