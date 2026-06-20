@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ETH Signal Bot</title>
+  <style>
+    :root {
+      --bg:     #0d0d0d;
+      --card:   #141414;
+      --card2:  #1a1a1a;
+      --border: #222;
+      --text:   #e8e8e8;
+      --muted:  #555;
+      --green:  #00c987;
+      --red:    #ff4d4d;
+      --yellow: #f5a623;
+      --blue:   #4da6ff;
+      --cyan:   #00d4ff;
+      --purple: #b06aff;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px 64px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    header h1 { font-size: 1.55rem; font-weight: 700; color: var(--cyan); letter-spacing:.04em; }
+    header p  { color: var(--muted); font-size: .82rem; margin-top: 5px; }
+
+    /* ── Status pill ── */
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: .75rem;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      padding: 5px 14px;
+      border-radius: 999px;
+      margin-bottom: 20px;
+    }
+    .status-pill .dot { width:8px;height:8px;border-radius:50%; }
+    .pill-IDLE   { background:rgba(85,85,85,.18); color:var(--muted); }
+    .pill-IDLE   .dot { background:var(--muted); }
+    .pill-ACTIVE { background:rgba(0,201,135,.12); color:var(--green); }
+    .pill-ACTIVE .dot { background:var(--green); animation: pulse 1.2s infinite; }
+    .pill-CLOSED-TP { background:rgba(0,201,135,.18); color:var(--green); }
+    .pill-CLOSED-TP .dot { background:var(--green); }
+    .pill-CLOSED-SL { background:rgba(255,77,77,.18); color:var(--red); }
+    .pill-CLOSED-SL .dot { background:var(--red); }
+
+    @keyframes pulse {
+      0%,100% { opacity:1; }
+      50%      { opacity:.3; }
+    }
+
+    /* ── Card ── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 22px;
+      width: 100%;
+      max-width: 480px;
+      margin-bottom: 14px;
+    }
+
+    .card-title {
+      font-size: .68rem;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+
+    /* ── Signal badge ── */
+    .signal-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+    }
+    .signal-badge {
+      font-size: 1.9rem;
+      font-weight: 800;
+      letter-spacing: .06em;
+      padding: 5px 22px;
+      border-radius: 10px;
+    }
+    .signal-BUY  { color:var(--green);  background:rgba(0,201,135,.12); }
+    .signal-SELL { color:var(--red);    background:rgba(255,77,77,.12);  }
+    .signal-HOLD { color:var(--yellow); background:rgba(245,166,35,.12); }
+
+    .score-dots { display:flex; gap:5px; }
+    .dot-s { width:9px;height:9px;border-radius:50%;background:var(--border); }
+    .dot-s.bull { background:var(--green); }
+    .dot-s.bear { background:var(--red);   }
+    .dot-s.flat { background:var(--yellow);}
+
+    /* ── Price grid ── */
+    .price-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .pbox {
+      background: var(--card2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 11px 13px;
+    }
+    .pbox .lbl { font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px; }
+    .pbox .val { font-size:1.05rem;font-weight:700; }
+    .pbox .sub { font-size:.7rem;color:var(--muted);margin-top:2px; }
+    .pbox.entry .val  { color:var(--blue);   }
+    .pbox.sl    .val  { color:var(--red);    }
+    .pbox.tp    .val  { color:var(--green);  }
+    .pbox.rr    .val  { color:var(--yellow); }
+    .pbox.live  .val  { color:var(--cyan);   }
+    .pbox.pnl-pos .val { color:var(--green); }
+    .pbox.pnl-neg .val { color:var(--red);   }
+
+    /* ── Live PnL bar ── */
+    .pnl-bar-wrap {
+      margin-bottom: 18px;
+    }
+    .pnl-bar-lbl {
+      display: flex;
+      justify-content: space-between;
+      font-size: .72rem;
+      color: var(--muted);
+      margin-bottom: 5px;
+    }
+    .pnl-bar-bg {
+      height: 6px;
+      border-radius: 3px;
+      background: var(--border);
+      overflow: hidden;
+    }
+    .pnl-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width .6s ease, background .6s ease;
+    }
+
+    /* ── Indicators ── */
+    .ind-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+      margin-bottom: 18px;
+    }
+    .ind-item {
+      display:flex;
+      justify-content:space-between;
+      font-size:.8rem;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .ind-item .k { color:var(--muted); }
+    .ind-item .v { font-weight:600; }
+
+    /* ── Reasons ── */
+    .reason-list { list-style:none; }
+    .reason-list li {
+      display:flex;align-items:center;gap:8px;
+      font-size:.8rem;padding:6px 0;
+      border-bottom:1px solid var(--border);
+    }
+    .reason-list li:last-child { border-bottom:none; }
+    .arr { font-size:.85rem; }
+    .arr.up   { color:var(--green);  }
+    .arr.down { color:var(--red);    }
+    .arr.flat { color:var(--yellow); }
+
+    /* ── History ── */
+    .hist-row {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: .8rem;
+    }
+    .hist-row:last-child { border-bottom:none; }
+    .hist-badge {
+      font-size:.72rem;font-weight:700;
+      padding:2px 8px;border-radius:5px;
+      margin-right:8px;
+    }
+    .hist-TP { background:rgba(0,201,135,.15);color:var(--green); }
+    .hist-SL { background:rgba(255,77,77,.15); color:var(--red);  }
+    .hist-dir-BUY  { color:var(--green); font-weight:600; }
+    .hist-dir-SELL { color:var(--red);   font-weight:600; }
+    .hist-pnl-pos { color:var(--green); font-weight:700; }
+    .hist-pnl-neg { color:var(--red);   font-weight:700; }
+    .hist-time { color:var(--muted); font-size:.7rem; }
+
+    /* ── Closed banner ── */
+    .closed-banner {
+      text-align:center;
+      padding:18px;
+      border-radius:12px;
+      margin-bottom:14px;
+      font-size:1rem;
+      font-weight:700;
+    }
+    .closed-banner.win { background:rgba(0,201,135,.12);color:var(--green); }
+    .closed-banner.loss{ background:rgba(255,77,77,.12); color:var(--red);  }
+
+    /* ── Idle scanner ── */
+    .scanning {
+      text-align:center;
+      padding:28px 0;
+      color:var(--muted);
+      font-size:.85rem;
+    }
+
+    /* ── Progress bar ── */
+    .refresh-bar {
+      width:100%;max-width:480px;
+      height:3px;background:var(--border);
+      border-radius:2px;margin-top:10px;overflow:hidden;
+    }
+    .refresh-bar-fill {
+      height:100%;background:var(--cyan);
+      border-radius:2px;transition:width 1s linear;
+    }
+
+    .meta { text-align:center;font-size:.72rem;color:var(--muted);margin-top:6px; }
+
+    .spinner {
+      display:inline-block;width:13px;height:13px;
+      border:2px solid var(--border);border-top-color:var(--cyan);
+      border-radius:50%;animation:spin .7s linear infinite;
+      vertical-align:middle;margin-right:5px;
+    }
+    @keyframes spin { to { transform:rotate(360deg); } }
+
+    .error-msg { color:var(--red);font-size:.85rem;text-align:center;padding:16px; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>⚡ ETH/USDT Signal Bot</h1>
+    <p>15m signals · EMA · RSI · MACD · ATR · Auto-advances on trade close</p>
+  </header>
+
+  <div id="status-wrap"></div>
+  <div id="main-card" class="card">
+    <div style="text-align:center;padding:32px 0;color:var(--muted)">
+      <span class="spinner"></span> Loading…
+    </div>
+  </div>
+  <div id="history-card" class="card" style="display:none"></div>
+
+  <div class="refresh-bar"><div class="refresh-bar-fill" id="progress-bar" style="width:100%"></div></div>
+  <p class="meta" id="meta-text">Connecting…</p>
+
+  <script>
+    // ── CONFIG — replace with your Railway/Render API URL ──────────────────
+    const API_URL = "https://YOUR-API-URL.railway.app/signal";
+    // ───────────────────────────────────────────────────────────────────────
+
+    const REFRESH_SEC = 15;   // poll every 15s so trade closes are caught fast
+    let countdown = REFRESH_SEC;
+    let progressInterval = null;
+
+    const fmt = (n, d=2) => n == null ? "—" : "$" + Number(n).toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d});
+    const pct = (n) => n == null ? "—" : (n >= 0 ? "+" : "") + n + "%";
+
+    function dotColor(s) { return s > 0 ? "bull" : s < 0 ? "bear" : "flat"; }
+    function arrClass(s) { return s > 0 ? "up"   : s < 0 ? "down" : "flat"; }
+    function arrIcon(s)  { return s > 0 ? "▲"    : s < 0 ? "▼"   : "●"; }
+
+    /* ── Status pill ── */
+    function renderPill(status, trade) {
+      let cls = "pill-IDLE", label = "Scanning for signal…";
+      if (status === "ACTIVE") {
+        cls = "pill-ACTIVE";
+        label = `Trade ACTIVE · ${trade.signal}`;
+      } else if (status === "CLOSED") {
+        const win = trade.exit_reason === "TP";
+        cls = win ? "pill-CLOSED-TP" : "pill-CLOSED-SL";
+        label = win ? "✓ Take-Profit Hit" : "✗ Stop-Loss Hit";
+      }
+      document.getElementById("status-wrap").innerHTML =
+        `<div class="status-pill ${cls}"><div class="dot"></div>${label}</div>`;
+    }
+
+    /* ── PnL progress bar ── */
+    function pnlBar(trade) {
+      const val  = trade.unrealised_pct ?? 0;
+      // map -sl_pct … +tp_pct to 0…100%
+      const low  = -(trade.sl_pct  ?? 2);
+      const high =  (trade.tp_pct  ?? 4);
+      const pct  = Math.max(0, Math.min(100, ((val - low) / (high - low)) * 100));
+      const col  = val >= 0 ? "var(--green)" : "var(--red)";
+      return `
+        <div class="pnl-bar-wrap">
+          <div class="pnl-bar-lbl">
+            <span>SL ${fmt(trade.sl)}</span>
+            <span style="color:${val>=0?'var(--green)':'var(--red)'};font-weight:700">${pct >= 0 ? "+" : ""}${val}%</span>
+            <span>TP ${fmt(trade.tp)}</span>
+          </div>
+          <div class="pnl-bar-bg">
+            <div class="pnl-bar-fill" style="width:${pct}%;background:${col}"></div>
+          </div>
+        </div>`;
+    }
+
+    /* ── Reasons list ── */
+    function reasonsHtml(reasons) {
+      if (!reasons || !reasons.length) return "";
+      return `
+        <div class="card-title">Reasoning</div>
+        <ul class="reason-list">
+          ${reasons.map(r => `
+            <li>
+              <span class="arr ${arrClass(r.score)}">${arrIcon(r.score)}</span>
+              ${r.text}
+            </li>`).join("")}
+        </ul>`;
+    }
+
+    /* ── Indicators ── */
+    function indicatorsHtml(sig) {
+      return `
+        <div class="card-title">Indicators</div>
+        <div class="ind-grid">
+          <div class="ind-item"><span class="k">RSI (14)</span><span class="v">${sig.rsi}</span></div>
+          <div class="ind-item"><span class="k">ATR (14)</span><span class="v">${sig.atr}</span></div>
+          <div class="ind-item"><span class="k">EMA 9</span><span class="v">${sig.ema9}</span></div>
+          <div class="ind-item"><span class="k">EMA 21</span><span class="v">${sig.ema21}</span></div>
+          <div class="ind-item"><span class="k">MACD</span><span class="v">${sig.macd}</span></div>
+          <div class="ind-item"><span class="k">Signal</span><span class="v">${sig.macd_signal}</span></div>
+        </div>`;
+    }
+
+    /* ── Score dots ── */
+    function dotsHtml(reasons) {
+      return (reasons || []).map(r =>
+        `<div class="dot-s ${dotColor(r.score)}"></div>`
+      ).join("");
+    }
+
+    /* ── Main render ── */
+    function render(json) {
+      const { status, signal, trade, history } = json;
+      const card = document.getElementById("main-card");
+      const histCard = document.getElementById("history-card");
+
+      renderPill(status, trade);
+
+      // ── IDLE: show latest indicator scan ─────────────────────────────────
+      if (status === "IDLE") {
+        if (!signal) {
+          card.innerHTML = `<div class="scanning"><span class="spinner"></span> Scanning market…</div>`;
+        } else {
+          const sig = signal;
+          card.innerHTML = `
+            <div class="card-title">Latest Scan · ${sig.interval}</div>
+            <div class="signal-row">
+              <div class="signal-badge signal-${sig.signal}">${sig.signal}</div>
+              <div class="score-dots">${dotsHtml(sig.reasons)}</div>
+            </div>
+            <div class="price-grid">
+              <div class="pbox entry">
+                <div class="lbl">Entry Price</div>
+                <div class="val">${fmt(sig.entry)}</div>
+                <div class="sub">current close</div>
+              </div>
+              <div class="pbox rr">
+                <div class="lbl">Score</div>
+                <div class="val">${sig.score > 0 ? "+" : ""}${sig.score} / 5</div>
+                <div class="sub">${sig.signal === "HOLD" ? "waiting for edge" : "signal fired"}</div>
+              </div>
+              <div class="pbox sl">
+                <div class="lbl">Stop-Loss</div>
+                <div class="val">${fmt(sig.sl)}</div>
+                <div class="sub">${sig.sl_pct ? sig.sl_pct + "% away" : "—"}</div>
+              </div>
+              <div class="pbox tp">
+                <div class="lbl">Take-Profit</div>
+                <div class="val">${fmt(sig.tp)}</div>
+                <div class="sub">${sig.tp_pct ? sig.tp_pct + "% away" : "—"}</div>
+              </div>
+            </div>
+            ${indicatorsHtml(sig)}
+            ${reasonsHtml(sig.reasons)}
+          `;
+        }
+      }
+
+      // ── ACTIVE: show live trade status ───────────────────────────────────
+      else if (status === "ACTIVE" && trade) {
+        const t = trade;
+        const pnlPos = (t.unrealised_pct ?? 0) >= 0;
+        card.innerHTML = `
+          <div class="card-title">Active Trade · ${signal?.interval ?? "15m"} · opened ${t.opened_at}</div>
+          <div class="signal-row">
+            <div class="signal-badge signal-${t.signal}">${t.signal}</div>
+            <div style="font-size:.8rem;color:var(--muted)">watching SL / TP…</div>
+          </div>
+          <div class="price-grid">
+            <div class="pbox entry">
+              <div class="lbl">Entry Price</div>
+              <div class="val">${fmt(t.entry)}</div>
+              <div class="sub">where trade opened</div>
+            </div>
+            <div class="pbox live">
+              <div class="lbl">Live Price</div>
+              <div class="val">${fmt(t.live_price)}</div>
+              <div class="sub">current ETH price</div>
+            </div>
+            <div class="pbox sl">
+              <div class="lbl">Stop-Loss</div>
+              <div class="val">${fmt(t.sl)}</div>
+              <div class="sub">${t.sl_pct}% from entry</div>
+            </div>
+            <div class="pbox tp">
+              <div class="lbl">Take-Profit</div>
+              <div class="val">${fmt(t.tp)}</div>
+              <div class="sub">${t.tp_pct}% from entry</div>
+            </div>
+          </div>
+          ${pnlBar(t)}
+          <div class="price-grid" style="margin-bottom:0">
+            <div class="pbox rr">
+              <div class="lbl">Risk / Reward</div>
+              <div class="val">${t.rr ? t.rr + "R" : "—"}</div>
+            </div>
+            <div class="pbox ${pnlPos ? "pnl-pos" : "pnl-neg"}">
+              <div class="lbl">Unrealised P&L</div>
+              <div class="val">${pct(t.unrealised_pct)}</div>
+            </div>
+          </div>
+        `;
+      }
+
+      // ── CLOSED: show result, next signal loads automatically ─────────────
+      else if (status === "CLOSED" && trade) {
+        const t   = trade;
+        const win = t.exit_reason === "TP";
+        card.innerHTML = `
+          <div class="closed-banner ${win ? "win" : "loss"}">
+            ${win ? "✅ Take-Profit Hit" : "❌ Stop-Loss Hit"} &nbsp; ${pct(t.pnl_pct)}
+          </div>
+          <div class="price-grid">
+            <div class="pbox entry">
+              <div class="lbl">Entry</div>
+              <div class="val">${fmt(t.entry)}</div>
+            </div>
+            <div class="pbox ${win ? "tp" : "sl"}">
+              <div class="lbl">Exit</div>
+              <div class="val">${fmt(t.exit_price)}</div>
+            </div>
+            <div class="pbox sl">
+              <div class="lbl">Stop-Loss</div>
+              <div class="val">${fmt(t.sl)}</div>
+            </div>
+            <div class="pbox tp">
+              <div class="lbl">Take-Profit</div>
+              <div class="val">${fmt(t.tp)}</div>
+            </div>
+          </div>
+          <div style="text-align:center;color:var(--muted);font-size:.8rem;padding:10px 0">
+            <span class="spinner"></span> Scanning for next signal…
+          </div>
+        `;
+      }
+
+      // ── Trade history ─────────────────────────────────────────────────────
+      if (history && history.length > 0) {
+        histCard.style.display = "block";
+        const rows = history.map(t => {
+          const win = t.exit_reason === "TP";
+          return `
+            <div class="hist-row">
+              <div>
+                <span class="hist-badge hist-${t.exit_reason}">${t.exit_reason}</span>
+                <span class="hist-dir-${t.signal}">${t.signal}</span>
+              </div>
+              <div style="text-align:center">
+                <div>${fmt(t.entry)} → ${fmt(t.exit_price)}</div>
+                <div class="hist-time">${t.closed_at ?? ""}</div>
+              </div>
+              <div class="hist-pnl-${win ? "pos" : "neg"}">${pct(t.pnl_pct)}</div>
+            </div>`;
+        }).join("");
+
+        histCard.innerHTML = `
+          <div class="card-title">Trade History (last ${history.length})</div>
+          ${rows}
+        `;
+      } else {
+        histCard.style.display = "none";
+      }
+    }
+
+    /* ── Fetch loop ── */
+    async function fetchSignal() {
+      document.getElementById("meta-text").innerHTML =
+        `<span class="spinner"></span> Fetching…`;
+      try {
+        const res  = await fetch(API_URL);
+        const json = await res.json();
+        if (json.ok) {
+          render(json);
+          document.getElementById("meta-text").textContent =
+            `Last updated: ${json.last_update ?? "—"} · polling every ${REFRESH_SEC}s`;
+        } else {
+          document.getElementById("main-card").innerHTML =
+            `<div class="error-msg">API error: ${json.error}</div>`;
+        }
+      } catch(e) {
+        document.getElementById("main-card").innerHTML =
+          `<div class="error-msg">
+            Cannot reach API.<br>
+            <small>Set API_URL in index.html to your Railway URL.</small>
+          </div>`;
+        document.getElementById("meta-text").textContent = "Connection failed";
+      }
+      countdown = REFRESH_SEC;
+    }
+
+    function startProgress() {
+      const bar = document.getElementById("progress-bar");
+      if (progressInterval) clearInterval(progressInterval);
+      progressInterval = setInterval(() => {
+        countdown--;
+        bar.style.width = (countdown / REFRESH_SEC * 100) + "%";
+        if (countdown <= 0) {
+          clearInterval(progressInterval);
+          fetchSignal().then(startProgress);
+        }
+      }, 1000);
+    }
+
+    fetchSignal().then(startProgress);
+  </script>
+</body>
+</html>
