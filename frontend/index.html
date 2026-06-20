@@ -411,7 +411,14 @@
           card.innerHTML = `
             <div class="card-title">Latest Scan · ${sig.interval}</div>
             <div class="signal-row">
-              <div class="signal-badge signal-${sig.signal}">${sig.signal}</div>
+              <div>
+                <div class="signal-badge signal-${sig.signal}">${sig.signal}</div>
+                <div style="margin-top:8px;font-size:.85rem;font-weight:600;color:${sig.signal==='BUY'?'var(--green)':sig.signal==='SELL'?'var(--red)':'var(--yellow)'}">
+                  ${sig.signal==='BUY' ? '⚡ ENTER LONG NOW at ' + fmt(sig.entry) :
+                    sig.signal==='SELL' ? '⚡ ENTER SHORT NOW at ' + fmt(sig.entry) :
+                    '⏳ DO NOT ENTER — waiting for clear signal'}
+                </div>
+              </div>
               <div class="score-dots">${dotsHtml(sig.reasons)}</div>
             </div>
             <div class="price-grid">
@@ -450,7 +457,10 @@
           <div class="card-title">Active Trade · ${signal?.interval ?? "15m"} · opened ${t.opened_at}</div>
           <div class="signal-row">
             <div class="signal-badge signal-${t.signal}">${t.signal}</div>
-            <div style="font-size:.8rem;color:var(--muted)">watching SL / TP…</div>
+            <div style="font-size:.8rem;color:var(--muted)">
+              ${t.signal==='BUY' ? '✅ You should be LONG (bought)' : '✅ You should be SHORT (sold)'}<br>
+              <span style="color:var(--cyan);font-size:.75rem">watching SL / TP…</span>
+            </div>
           </div>
           <div class="price-grid">
             <div class="pbox entry">
