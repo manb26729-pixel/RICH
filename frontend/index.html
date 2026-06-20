@@ -361,21 +361,29 @@
     /* ── Indicators ── */
     function indicatorsHtml(sig) {
       const volPct = sig.volume_ma ? ((sig.volume - sig.volume_ma) / sig.volume_ma * 100).toFixed(0) : null;
-      const volColor = volPct > 10 ? 'var(--green)' : volPct < -30 ? 'var(--red)' : 'var(--text)';
+      const volColor = volPct > 20 ? 'var(--green)' : volPct < -30 ? 'var(--red)' : 'var(--text)';
       const adxColor = sig.adx > 30 ? 'var(--green)' : sig.adx > 20 ? 'var(--yellow)' : 'var(--red)';
+      const fngColor = sig.fear_greed <= 25 ? 'var(--green)' : sig.fear_greed >= 75 ? 'var(--red)' : 'var(--yellow)';
+      const htfColor = sig.htf_trend === 'BULL' ? 'var(--green)' : sig.htf_trend === 'BEAR' ? 'var(--red)' : 'var(--yellow)';
+      const obColor  = sig.bid_pct >= 55 ? 'var(--green)' : sig.bid_pct <= 45 ? 'var(--red)' : 'var(--text)';
       return `
-        <div class="card-title">Indicators</div>
+        <div class="card-title">Indicators (${sig.score > 0 ? '+' : ''}${sig.score} / ${sig.max_score} = ${sig.score_pct}%)</div>
         <div class="ind-grid">
           <div class="ind-item"><span class="k">RSI (14)</span><span class="v">${sig.rsi}</span></div>
-          <div class="ind-item"><span class="k">ATR (14)</span><span class="v">${sig.atr}</span></div>
-          <div class="ind-item"><span class="k">EMA 9</span><span class="v">${sig.ema9}</span></div>
-          <div class="ind-item"><span class="k">EMA 21</span><span class="v">${sig.ema21}</span></div>
-          <div class="ind-item"><span class="k">EMA 50</span><span class="v">${sig.ema50}</span></div>
-          <div class="ind-item"><span class="k">ADX</span><span class="v" style="color:${adxColor}">${sig.adx} ${sig.trending ? '(trending)' : '(ranging)'}</span></div>
+          <div class="ind-item"><span class="k">Stoch RSI</span><span class="v">${sig.stoch_rsi}</span></div>
+          <div class="ind-item"><span class="k">EMA 9/21</span><span class="v">${sig.ema9} / ${sig.ema21}</span></div>
+          <div class="ind-item"><span class="k">EMA 50/200</span><span class="v">${sig.ema50} / ${sig.ema200}</span></div>
           <div class="ind-item"><span class="k">MACD</span><span class="v">${sig.macd}</span></div>
-          <div class="ind-item"><span class="k">Signal</span><span class="v">${sig.macd_signal}</span></div>
-          <div class="ind-item"><span class="k">Volume</span><span class="v" style="color:${volColor}">${sig.volume?.toFixed(0)} ${volPct !== null ? (volPct > 0 ? '+' : '') + volPct + '% vs MA' : ''}</span></div>
-          <div class="ind-item"><span class="k">Candle</span><span class="v" style="color:${sig.candle === 'BULL' ? 'var(--green)' : sig.candle === 'BEAR' ? 'var(--red)' : 'var(--muted)'}">${sig.candle || 'None'}</span></div>
+          <div class="ind-item"><span class="k">ATR (14)</span><span class="v">${sig.atr}</span></div>
+          <div class="ind-item"><span class="k">ADX</span><span class="v" style="color:${adxColor}">${sig.adx} ${sig.trending?'📈':'📊'}</span></div>
+          <div class="ind-item"><span class="k">+DI / -DI</span><span class="v">${sig.plus_di} / ${sig.minus_di}</span></div>
+          <div class="ind-item"><span class="k">BB Upper</span><span class="v">${sig.bb_upper}</span></div>
+          <div class="ind-item"><span class="k">BB Lower</span><span class="v">${sig.bb_lower}</span></div>
+          <div class="ind-item"><span class="k">Volume</span><span class="v" style="color:${volColor}">${sig.volume?.toFixed(1)} (${volPct !== null ? (volPct>0?'+':'')+volPct+'%' : '—'})</span></div>
+          <div class="ind-item"><span class="k">Candle</span><span class="v" style="color:${sig.candle==='BULL'?'var(--green)':sig.candle==='BEAR'?'var(--red)':'var(--muted)'}">${sig.candle||'None'}</span></div>
+          <div class="ind-item"><span class="k">1h Trend</span><span class="v" style="color:${htfColor}">${sig.htf_trend}</span></div>
+          <div class="ind-item"><span class="k">Order Book</span><span class="v" style="color:${obColor}">${sig.bid_pct}% bids</span></div>
+          <div class="ind-item"><span class="k">Fear & Greed</span><span class="v" style="color:${fngColor}">${sig.fear_greed} — ${sig.fear_greed_label}</span></div>
         </div>`;
     }
 
