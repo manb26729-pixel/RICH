@@ -42,6 +42,7 @@ SL_ATR_MULT  = 1.5
 TP_ATR_MULT  = 3.0
 MIN_RR       = 1.8   # minimum risk/reward enforced on every signal
 MIN_SCORE    = 8      # out of 14
+MIN_ADX      = 20     # below this = ranging market, no signal
 POLL_SECONDS = 60
 ACCOUNT_SIZE_USDT  = 1000.0
 RISK_PCT_PER_TRADE = 0.01
