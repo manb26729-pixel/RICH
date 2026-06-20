@@ -1,25 +1,18 @@
 """
 ETH Trading Signal Bot — FastAPI Backend
-Deploy on Railway / Render (free tier).
-
-Signal lifecycle:
-  IDLE      → no active trade, scanning for next signal
-  ACTIVE    → trade open, watching price vs SL/TP
-  CLOSED    → last trade just closed (TP hit or SL hit), shown briefly
-              then resets to IDLE to scan for the next signal
+No pandas/numpy — pure Python calculations.
+Zero build issues, works on any Python version.
 """
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import requests
-import pandas as pd
-import numpy as np
-from datetime import datetime, timezone
 import threading
 import time
+import math
+from datetime import datetime, timezone
 
 app = FastAPI()
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -37,110 +30,171 @@ SL_ATR_MULT    = 1.5
 TP_ATR_MULT    = 3.0
 RSI_OVERSOLD   = 35
 RSI_OVERBOUGHT = 65
-POLL_SECONDS   = 60   # how often the background loop runs
-# ──────────────────────────────────────────────────────────────────────────────
-
-# ─── Shared state (protected by a lock) ───────────────────────────────────────
-_lock  = threading.Lock()
-_state = {
-    "status":       "IDLE",       # IDLE | ACTIVE | CLOSED
-    "signal":       None,         # last generated signal dict
-    "trade":        None,         # active trade dict
-    "last_signal":  None,         # last BUY/SELL signal (for history)
-    "history":      [],           # list of closed trades
-    "last_update":  None,
-    "error":        None,
-}
+POLL_SECONDS   = 60
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def fetch_candles():
+# ─── Pure Python indicator math ───────────────────────────────────────────────
+
+def ema(values: list, span: int) -> list:
+    """Exponential moving average."""
+    k = 2.0 / (span + 1)
+    result = [None] * len(values)
+    for i, v in enumerate(values):
+        if v is None:
+            continue
+        if result[i - 1] is None:
+            result[i] = v
+        else:
+            result[i] = v * k + result[i - 1] * (1 - k)
+    return result
+
+
+def ema_com(values: list, com: int) -> list:
+    """EMA with center-of-mass (alpha = 1/(1+com))."""
+    k = 1.0 / (1 + com)
+    result = [None] * len(values)
+    for i, v in enumerate(values):
+        if v is None:
+            continue
+        if result[i - 1] is None:
+            result[i] = v
+        else:
+            result[i] = v * k + result[i - 1] * (1 - k)
+    return result
+
+
+def compute_indicators(candles: list) -> dict:
+    closes = [c["close"] for c in candles]
+    highs  = [c["high"]  for c in candles]
+    lows   = [c["low"]   for c in candles]
+
+    # EMA 9 / 21
+    ema9  = ema(closes, 9)
+    ema21 = ema(closes, 21)
+
+    # RSI 14
+    gains  = [max(closes[i] - closes[i-1], 0) for i in range(1, len(closes))]
+    losses = [max(closes[i-1] - closes[i], 0) for i in range(1, len(closes))]
+    gains  = [None] + gains
+    losses = [None] + losses
+    avg_gain = ema_com(gains,  13)
+    avg_loss = ema_com(losses, 13)
+    rsi = []
+    for g, l in zip(avg_gain, avg_loss):
+        if g is None or l is None:
+            rsi.append(None)
+        elif l == 0:
+            rsi.append(100.0)
+        else:
+            rsi.append(100 - (100 / (1 + g / l)))
+
+    # MACD (12, 26, 9)
+    ema12  = ema(closes, 12)
+    ema26  = ema(closes, 26)
+    macd_line = [
+        (a - b) if (a is not None and b is not None) else None
+        for a, b in zip(ema12, ema26)
+    ]
+    macd_signal = ema(macd_line, 9)
+    macd_hist   = [
+        (a - b) if (a is not None and b is not None) else None
+        for a, b in zip(macd_line, macd_signal)
+    ]
+
+    # ATR 14
+    tr = [None]
+    for i in range(1, len(closes)):
+        tr1 = highs[i] - lows[i]
+        tr2 = abs(highs[i] - closes[i-1])
+        tr3 = abs(lows[i]  - closes[i-1])
+        tr.append(max(tr1, tr2, tr3))
+    atr = ema_com(tr, 13)
+
+    return {
+        "ema9":        ema9,
+        "ema21":       ema21,
+        "rsi":         rsi,
+        "macd":        macd_line,
+        "macd_signal": macd_signal,
+        "macd_hist":   macd_hist,
+        "atr":         atr,
+    }
+
+
+def fetch_candles() -> list:
     params = {"symbol": SYMBOL, "interval": INTERVAL, "limit": LIMIT}
     resp = requests.get(BINANCE_URL, params=params, timeout=10)
     resp.raise_for_status()
-    raw = resp.json()
-    df = pd.DataFrame(raw, columns=[
-        "open_time", "open", "high", "low", "close", "volume",
-        "close_time", "quote_vol", "trades", "taker_base", "taker_quote", "ignore"
-    ])
-    for col in ["open", "high", "low", "close", "volume"]:
-        df[col] = df[col].astype(float)
-    df["open_time"] = pd.to_datetime(df["open_time"], unit="ms")
-    return df
+    return [
+        {
+            "open_time": row[0],
+            "open":  float(row[1]),
+            "high":  float(row[2]),
+            "low":   float(row[3]),
+            "close": float(row[4]),
+        }
+        for row in resp.json()
+    ]
 
 
-def get_live_price():
+def get_live_price() -> float:
     resp = requests.get(TICKER_URL, params={"symbol": SYMBOL}, timeout=5)
     resp.raise_for_status()
     return float(resp.json()["price"])
 
 
-def compute_indicators(df):
-    close = df["close"]
-    high  = df["high"]
-    low   = df["low"]
-
-    df["ema9"]  = close.ewm(span=9,  adjust=False).mean()
-    df["ema21"] = close.ewm(span=21, adjust=False).mean()
-
-    delta    = close.diff()
-    gain     = delta.clip(lower=0)
-    loss     = (-delta).clip(lower=0)
-    avg_gain = gain.ewm(com=13, adjust=False).mean()
-    avg_loss = loss.ewm(com=13, adjust=False).mean()
-    rs       = avg_gain / avg_loss.replace(0, np.nan)
-    df["rsi"] = 100 - (100 / (1 + rs))
-
-    ema12 = close.ewm(span=12, adjust=False).mean()
-    ema26 = close.ewm(span=26, adjust=False).mean()
-    df["macd"]        = ema12 - ema26
-    df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
-    df["macd_hist"]   = df["macd"] - df["macd_signal"]
-
-    tr1 = high - low
-    tr2 = (high - close.shift()).abs()
-    tr3 = (low  - close.shift()).abs()
-    tr  = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    df["atr"] = tr.ewm(com=13, adjust=False).mean()
-
-    return df
+def r2(v): return round(v, 2) if v is not None else None
+def r4(v): return round(v, 4) if v is not None else None
 
 
-def generate_signal(df):
-    last  = df.iloc[-1]
-    prev  = df.iloc[-2]
-    price = last["close"]
-    atr   = last["atr"]
-    rsi   = last["rsi"]
+def generate_signal(candles: list) -> dict:
+    ind   = compute_indicators(candles)
+    n     = len(candles) - 1     # last index
+    price = candles[n]["close"]
+
+    e9   = ind["ema9"][n]
+    e21  = ind["ema21"][n]
+    rsi  = ind["rsi"][n]
+    macd = ind["macd"][n]
+    msig = ind["macd_signal"][n]
+    mhst = ind["macd_hist"][n]
+    mhst_prev = ind["macd_hist"][n-1]
+    atr  = ind["atr"][n]
 
     scores  = []
     reasons = []
 
-    if last["ema9"] > last["ema21"]:
+    # 1. EMA crossover
+    if e9 and e21 and e9 > e21:
         scores.append(1);  reasons.append("EMA9 > EMA21 — bullish trend")
     else:
         scores.append(-1); reasons.append("EMA9 < EMA21 — bearish trend")
 
-    if price > last["ema21"]:
+    # 2. Price vs EMA21
+    if e21 and price > e21:
         scores.append(1);  reasons.append("Price above EMA21")
     else:
         scores.append(-1); reasons.append("Price below EMA21")
 
-    if rsi < RSI_OVERSOLD:
+    # 3. RSI
+    if rsi and rsi < RSI_OVERSOLD:
         scores.append(1);  reasons.append(f"RSI {rsi:.1f} — oversold")
-    elif rsi > RSI_OVERBOUGHT:
+    elif rsi and rsi > RSI_OVERBOUGHT:
         scores.append(-1); reasons.append(f"RSI {rsi:.1f} — overbought")
     else:
-        scores.append(0);  reasons.append(f"RSI {rsi:.1f} — neutral")
+        scores.append(0);  reasons.append(f"RSI {rsi:.1f if rsi else '—'} — neutral")
 
-    if last["macd_hist"] > 0 and last["macd_hist"] > prev["macd_hist"]:
+    # 4. MACD histogram direction
+    if mhst and mhst_prev and mhst > 0 and mhst > mhst_prev:
         scores.append(1);  reasons.append("MACD histogram rising — bullish momentum")
-    elif last["macd_hist"] < 0 and last["macd_hist"] < prev["macd_hist"]:
+    elif mhst and mhst_prev and mhst < 0 and mhst < mhst_prev:
         scores.append(-1); reasons.append("MACD histogram falling — bearish momentum")
     else:
         scores.append(0);  reasons.append("MACD histogram flat/mixed")
 
-    if last["macd"] > last["macd_signal"]:
+    # 5. MACD vs signal
+    if macd and msig and macd > msig:
         scores.append(1);  reasons.append("MACD above signal line")
     else:
         scores.append(-1); reasons.append("MACD below signal line")
@@ -149,20 +203,19 @@ def generate_signal(df):
 
     if total >= 2:
         direction = "BUY"
-        sl = round(price - atr * SL_ATR_MULT, 2)
-        tp = round(price + atr * TP_ATR_MULT, 2)
+        sl = r2(price - atr * SL_ATR_MULT) if atr else None
+        tp = r2(price + atr * TP_ATR_MULT) if atr else None
     elif total <= -2:
         direction = "SELL"
-        sl = round(price + atr * SL_ATR_MULT, 2)
-        tp = round(price - atr * TP_ATR_MULT, 2)
+        sl = r2(price + atr * SL_ATR_MULT) if atr else None
+        tp = r2(price - atr * TP_ATR_MULT) if atr else None
     else:
         direction = "HOLD"
-        sl = None
-        tp = None
+        sl = tp = None
 
-    sl_dist = round(abs(sl - price) / price * 100, 2) if sl else None
-    tp_dist = round(abs(tp - price) / price * 100, 2) if tp else None
-    rr      = round(tp_dist / sl_dist, 1) if (sl_dist and sl_dist > 0) else None
+    sl_pct = r2(abs(sl - price) / price * 100) if sl else None
+    tp_pct = r2(abs(tp - price) / price * 100) if tp else None
+    rr     = r2(tp_pct / sl_pct) if (sl_pct and sl_pct > 0) else None
 
     return {
         "symbol":      SYMBOL,
@@ -170,91 +223,82 @@ def generate_signal(df):
         "timestamp":   datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "signal":      direction,
         "score":       total,
-        "entry":       round(price, 2),
+        "entry":       r2(price),
         "sl":          sl,
         "tp":          tp,
-        "sl_pct":      sl_dist,
-        "tp_pct":      tp_dist,
+        "sl_pct":      sl_pct,
+        "tp_pct":      tp_pct,
         "rr":          rr,
-        "rsi":         round(rsi, 2),
-        "atr":         round(atr, 2),
-        "ema9":        round(last["ema9"], 2),
-        "ema21":       round(last["ema21"], 2),
-        "macd":        round(last["macd"], 4),
-        "macd_signal": round(last["macd_signal"], 4),
+        "rsi":         r2(rsi),
+        "atr":         r2(atr),
+        "ema9":        r2(e9),
+        "ema21":       r2(e21),
+        "macd":        r4(macd),
+        "macd_signal": r4(msig),
         "reasons":     [{"text": r, "score": s} for r, s in zip(reasons, scores)],
     }
 
 
-def check_trade_closed(trade: dict, live_price: float) -> str | None:
-    """
-    Returns 'TP', 'SL', or None depending on whether price has
-    crossed the take-profit or stop-loss of the active trade.
-    """
-    sig = trade["signal"]
-    sl  = trade["sl"]
-    tp  = trade["tp"]
-
+def check_trade_closed(trade: dict, live: float):
+    sig, sl, tp = trade["signal"], trade["sl"], trade["tp"]
     if sig == "BUY":
-        if live_price >= tp:
-            return "TP"
-        if live_price <= sl:
-            return "SL"
+        if live >= tp: return "TP"
+        if live <= sl: return "SL"
     elif sig == "SELL":
-        if live_price <= tp:
-            return "TP"
-        if live_price >= sl:
-            return "SL"
+        if live <= tp: return "TP"
+        if live >= sl: return "SL"
     return None
 
 
 def pnl_pct(trade: dict, exit_price: float) -> float:
     entry = trade["entry"]
     if trade["signal"] == "BUY":
-        return round((exit_price - entry) / entry * 100, 2)
-    else:
-        return round((entry - exit_price) / entry * 100, 2)
+        return r2((exit_price - entry) / entry * 100)
+    return r2((entry - exit_price) / entry * 100)
 
 
-# ─── Background loop ──────────────────────────────────────────────────────────
+# ─── Shared state ─────────────────────────────────────────────────────────────
+_lock  = threading.Lock()
+_state = {
+    "status":      "IDLE",
+    "signal":      None,
+    "trade":       None,
+    "history":     [],
+    "last_update": None,
+    "error":       None,
+}
+
+
 def background_loop():
-    global _state
     while True:
         try:
             with _lock:
                 status = _state["status"]
 
             if status == "IDLE":
-                # Scan for a new signal
-                df     = fetch_candles()
-                df     = compute_indicators(df)
-                sig    = generate_signal(df)
-
+                candles = fetch_candles()
+                sig     = generate_signal(candles)
                 with _lock:
                     _state["signal"]      = sig
-                    _state["last_update"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+                    _state["last_update"] = sig["timestamp"]
                     _state["error"]       = None
-
                     if sig["signal"] in ("BUY", "SELL"):
-                        # Open a new trade
                         _state["status"] = "ACTIVE"
                         _state["trade"]  = {
-                            "signal":     sig["signal"],
-                            "entry":      sig["entry"],
-                            "sl":         sig["sl"],
-                            "tp":         sig["tp"],
-                            "sl_pct":     sig["sl_pct"],
-                            "tp_pct":     sig["tp_pct"],
-                            "rr":         sig["rr"],
-                            "opened_at":  sig["timestamp"],
-                            "live_price": sig["entry"],
-                            "unrealised_pct": 0.0,
+                            "signal":          sig["signal"],
+                            "entry":           sig["entry"],
+                            "sl":              sig["sl"],
+                            "tp":              sig["tp"],
+                            "sl_pct":          sig["sl_pct"],
+                            "tp_pct":          sig["tp_pct"],
+                            "rr":              sig["rr"],
+                            "opened_at":       sig["timestamp"],
+                            "live_price":      sig["entry"],
+                            "unrealised_pct":  0.0,
                         }
 
             elif status == "ACTIVE":
-                # Check if SL or TP was hit
-                live = get_live_price()
-                trade = None
+                live  = get_live_price()
                 with _lock:
                     trade = dict(_state["trade"])
 
@@ -262,33 +306,25 @@ def background_loop():
 
                 with _lock:
                     if _state["trade"]:
-                        _state["trade"]["live_price"]      = round(live, 2)
-                        _state["trade"]["unrealised_pct"]  = pnl_pct(trade, live)
+                        _state["trade"]["live_price"]     = r2(live)
+                        _state["trade"]["unrealised_pct"] = pnl_pct(trade, live)
                     _state["last_update"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
                 if result:
-                    closed_trade = dict(trade)
-                    closed_trade["exit_price"]  = round(live, 2)
-                    closed_trade["exit_reason"] = result          # 'TP' or 'SL'
-                    closed_trade["pnl_pct"]     = pnl_pct(trade, live)
-                    closed_trade["closed_at"]   = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
+                    closed = dict(trade)
+                    closed["exit_price"]  = r2(live)
+                    closed["exit_reason"] = result
+                    closed["pnl_pct"]     = pnl_pct(trade, live)
+                    closed["closed_at"]   = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
                     with _lock:
-                        _state["status"]      = "CLOSED"
-                        _state["trade"]       = closed_trade
-                        _state["last_signal"] = closed_trade
-                        _state["history"].insert(0, closed_trade)
-                        _state["history"]     = _state["history"][:20]  # keep last 20
-
-                    # Wait 10s so frontend can show the closed result, then reset to IDLE
+                        _state["status"]  = "CLOSED"
+                        _state["trade"]   = closed
+                        _state["history"] = [closed] + _state["history"]
+                        _state["history"] = _state["history"][:20]
                     time.sleep(10)
                     with _lock:
                         _state["status"] = "IDLE"
                         _state["trade"]  = None
-
-            elif status == "CLOSED":
-                # Handled above via sleep; just wait
-                pass
 
         except Exception as e:
             with _lock:
@@ -297,30 +333,26 @@ def background_loop():
         time.sleep(POLL_SECONDS)
 
 
-# Start background thread on startup
-_thread = threading.Thread(target=background_loop, daemon=True)
-_thread.start()
+threading.Thread(target=background_loop, daemon=True).start()
 # ──────────────────────────────────────────────────────────────────────────────
 
 
 @app.get("/")
 def root():
-    return {"status": "ETH Signal Bot API is running"}
+    return {"status": "ETH Signal Bot API running"}
 
 
 @app.get("/signal")
 def get_signal():
     with _lock:
-        state = dict(_state)
-
-    if state["error"]:
-        return {"ok": False, "error": state["error"]}
-
+        s = dict(_state)
+    if s["error"]:
+        return {"ok": False, "error": s["error"]}
     return {
         "ok":          True,
-        "status":      state["status"],        # IDLE | ACTIVE | CLOSED
-        "signal":      state["signal"],        # latest indicator snapshot
-        "trade":       state["trade"],         # active or just-closed trade
-        "history":     state["history"],       # last 20 closed trades
-        "last_update": state["last_update"],
+        "status":      s["status"],
+        "signal":      s["signal"],
+        "trade":       s["trade"],
+        "history":     s["history"],
+        "last_update": s["last_update"],
     }
