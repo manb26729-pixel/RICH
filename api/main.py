@@ -21,9 +21,9 @@ app.add_middleware(
 )
 
 # ─── Config ───────────────────────────────────────────────────────────────────
-BINANCE_URL    = "https://api1.binance.com/api/v3/klines"
-TICKER_URL     = "https://api1.binance.com/api/v3/ticker/price"
-SYMBOL         = "ETHUSDT"
+BINANCE_URL    = "https://api.binance.us/api/v3/klines"
+TICKER_URL     = "https://api.binance.us/api/v3/ticker/price"
+SYMBOL         = "ETHUSD"
 INTERVAL       = "15m"
 LIMIT          = 200
 SL_ATR_MULT    = 1.5
