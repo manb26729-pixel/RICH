@@ -289,6 +289,9 @@
   </div>
   <div id="history-card" class="card" style="display:none"></div>
 
+  <!-- Analysis section -->
+  <div id="analysis-card" class="card" style="display:none"></div>
+
   <div class="refresh-bar"><div class="refresh-bar-fill" id="progress-bar" style="width:100%"></div></div>
   <p class="meta" id="meta-text">Connecting…</p>
 
@@ -558,6 +561,105 @@
       }
     }
 
+    /* ── Analysis fetch ── */
+    async function fetchAnalysis() {
+      const ANALYSIS_URL = API_URL.replace("/signal", "/analysis");
+      try {
+        const res  = await fetch(ANALYSIS_URL);
+        const json = await res.json();
+        if (!json.ok) return;
+        renderAnalysis(json);
+      } catch(e) {}
+    }
+
+    function renderAnalysis(d) {
+      const card = document.getElementById("analysis-card");
+      card.style.display = "block";
+
+      const s = d.summary;
+      const trendColor = s.trend === "BULLISH" ? "var(--green)" : s.trend === "BEARISH" ? "var(--red)" : "var(--yellow)";
+      const fngColor   = d.fear_greed.value <= 25 ? "var(--green)" : d.fear_greed.value >= 75 ? "var(--red)" : "var(--yellow)";
+      const htfColor   = d.htf_trend === "BULL" ? "var(--green)" : d.htf_trend === "BEAR" ? "var(--red)" : "var(--yellow)";
+
+      // Price changes
+      const pc = s.price_change;
+      const chg = (v) => `<span style="color:${v>=0?'var(--green)':'var(--red)'}">${v>=0?'+':''}${v}%</span>`;
+
+      // Patterns
+      const patternsHtml = d.patterns.length > 0
+        ? d.patterns.map(p => `
+            <div class="hist-row">
+              <div>
+                <span class="hist-badge hist-${p.bias==='BULLISH'?'TP':'SL'}">${p.bias}</span>
+                <strong>${p.name}</strong>
+              </div>
+              <div style="font-size:.75rem;color:var(--muted);max-width:200px;text-align:right">${p.desc}</div>
+            </div>`).join("")
+        : `<div style="color:var(--muted);font-size:.8rem;padding:8px 0">No major patterns detected right now</div>`;
+
+      // Key levels
+      const lv = d.levels;
+      const lvRow = (label, price, pct, color) =>
+        `<div class="hist-row">
+          <span style="color:var(--muted);font-size:.8rem">${label}</span>
+          <span style="font-weight:700">${fmt(price)}</span>
+          <span style="color:${color};font-size:.8rem">${pct > 0 ? '+' : ''}${pct}%</span>
+        </div>`;
+
+      card.innerHTML = `
+        <div class="card-title">ETH Market Analysis · ${d.timestamp}</div>
+
+        <!-- Summary -->
+        <div class="price-grid" style="margin-bottom:14px">
+          <div class="pbox">
+            <div class="lbl">Trend</div>
+            <div class="val" style="color:${trendColor}">${s.trend}</div>
+            <div class="sub">${s.regime}</div>
+          </div>
+          <div class="pbox">
+            <div class="lbl">Momentum</div>
+            <div class="val" style="font-size:.85rem;color:${s.momentum.includes('BULL')?'var(--green)':s.momentum.includes('BEAR')?'var(--red)':'var(--yellow)'}">${s.momentum}</div>
+            <div class="sub">RSI ${s.rsi} · ADX ${s.adx}</div>
+          </div>
+          <div class="pbox">
+            <div class="lbl">1h Trend</div>
+            <div class="val" style="color:${htfColor}">${d.htf_trend}</div>
+            <div class="sub">higher timeframe</div>
+          </div>
+          <div class="pbox">
+            <div class="lbl">Fear & Greed</div>
+            <div class="val" style="color:${fngColor}">${d.fear_greed.value}</div>
+            <div class="sub">${d.fear_greed.label}</div>
+          </div>
+        </div>
+
+        <!-- Price changes -->
+        <div class="card-title">Price Performance</div>
+        <div class="ind-grid" style="margin-bottom:14px">
+          <div class="ind-item"><span class="k">1h change</span><span class="v">${chg(pc['1h'])}</span></div>
+          <div class="ind-item"><span class="k">4h change</span><span class="v">${chg(pc['4h'])}</span></div>
+          <div class="ind-item"><span class="k">24h change</span><span class="v">${chg(pc['24h'])}</span></div>
+          <div class="ind-item"><span class="k">Volume</span><span class="v" style="color:${s.volume==='HIGH'?'var(--green)':s.volume==='LOW'?'var(--red)':'var(--text)'}">${s.volume}</span></div>
+        </div>
+
+        <!-- Key levels -->
+        <div class="card-title">Key Price Levels</div>
+        ${lvRow("24h High", lv.d1_high, lv.d1_high_pct, "var(--green)")}
+        ${lvRow("R2 (Pivot Resistance 2)", lv.r2, lv.r2_pct, "var(--red)")}
+        ${lvRow("R1 (Pivot Resistance 1)", lv.r1, lv.r1_pct, "var(--red)")}
+        ${lvRow("Pivot Point", lv.pivot, lv.pivot_pct, "var(--blue)")}
+        ${lvRow("S1 (Pivot Support 1)", lv.s1, lv.s1_pct, "var(--green)")}
+        ${lvRow("S2 (Pivot Support 2)", lv.s2, lv.s2_pct, "var(--green)")}
+        ${lvRow("24h Low", lv.d1_low, lv.d1_low_pct, "var(--green)")}
+        ${lvRow("Weekly High", lv.wk_high, lv.wk_high_pct, "var(--muted)")}
+        ${lvRow("Weekly Low", lv.wk_low, lv.wk_low_pct, "var(--muted)")}
+
+        <!-- Chart patterns -->
+        <div class="card-title" style="margin-top:14px">Chart Patterns Detected</div>
+        ${patternsHtml}
+      `;
+    }
+
     /* ── Fetch loop ── */
     async function fetchSignal() {
       document.getElementById("meta-text").innerHTML =
@@ -598,6 +700,8 @@
     }
 
     fetchSignal().then(startProgress);
+    fetchAnalysis();
+    setInterval(fetchAnalysis, 5 * 60 * 1000); // refresh analysis every 5 min
   </script>
 </body>
 </html>

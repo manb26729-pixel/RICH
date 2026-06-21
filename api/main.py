@@ -554,3 +554,205 @@ def get_signal():
     if s["error"]: return {"ok":False,"error":s["error"]}
     return {"ok":True,"status":s["status"],"signal":s["signal"],
             "trade":s["trade"],"history":s["history"],"last_update":s["last_update"]}
+
+
+# ── Deep Market Analysis ──────────────────────────────────────────────────────
+
+def detect_chart_patterns(candles):
+    """Detect Head & Shoulders, Double Top/Bottom, Triangle, Flag patterns."""
+    patterns = []
+    closes = [c["close"] for c in candles]
+    highs  = [c["high"]  for c in candles]
+    lows   = [c["low"]   for c in candles]
+    n = len(closes) - 1
+
+    # Find recent swing highs/lows (last 50 candles)
+    sh, sl = [], []
+    for i in range(2, min(50, n)):
+        idx = n - i
+        if highs[idx] > highs[idx-1] and highs[idx] > highs[idx+1]:
+            sh.append((idx, highs[idx]))
+        if lows[idx] < lows[idx-1] and lows[idx] < lows[idx+1]:
+            sl.append((idx, lows[idx]))
+
+    # Double Top
+    if len(sh) >= 2:
+        h1, h2 = sh[0][1], sh[1][1]
+        if abs(h1 - h2) / h1 < 0.015:
+            patterns.append({"name":"Double Top","bias":"BEARISH","desc":f"Two equal highs near ${round(h1,0)} — reversal warning"})
+
+    # Double Bottom
+    if len(sl) >= 2:
+        l1, l2 = sl[0][1], sl[1][1]
+        if abs(l1 - l2) / l1 < 0.015:
+            patterns.append({"name":"Double Bottom","bias":"BULLISH","desc":f"Two equal lows near ${round(l1,0)} — reversal opportunity"})
+
+    # Higher Highs / Higher Lows (uptrend structure)
+    if len(sh) >= 2 and len(sl) >= 2:
+        if sh[0][1] > sh[1][1] and sl[0][1] > sl[1][1]:
+            patterns.append({"name":"Higher Highs & Higher Lows","bias":"BULLISH","desc":"Market structure is bullish — uptrend intact"})
+        elif sh[0][1] < sh[1][1] and sl[0][1] < sl[1][1]:
+            patterns.append({"name":"Lower Highs & Lower Lows","bias":"BEARISH","desc":"Market structure is bearish — downtrend intact"})
+
+    # Ascending Triangle (flat top, rising bottom)
+    if len(sh) >= 2 and len(sl) >= 2:
+        top_flat   = abs(sh[0][1] - sh[1][1]) / sh[0][1] < 0.01
+        bot_rising = sl[0][1] > sl[1][1]
+        if top_flat and bot_rising:
+            patterns.append({"name":"Ascending Triangle","bias":"BULLISH","desc":f"Flat resistance ~${round(sh[0][1],0)}, rising support — breakout likely UP"})
+
+    # Descending Triangle
+    if len(sh) >= 2 and len(sl) >= 2:
+        bot_flat   = abs(sl[0][1] - sl[1][1]) / sl[0][1] < 0.01
+        top_falling = sh[0][1] < sh[1][1]
+        if bot_flat and top_falling:
+            patterns.append({"name":"Descending Triangle","bias":"BEARISH","desc":f"Flat support ~${round(sl[0][1],0)}, falling resistance — breakout likely DOWN"})
+
+    # Bull Flag (sharp rally then tight consolidation)
+    recent_closes = closes[n-10:n]
+    if len(recent_closes) >= 10:
+        rally = (closes[n-10] - closes[n-20]) / closes[n-20] * 100 if n >= 20 else 0
+        consol = max(recent_closes) - min(recent_closes)
+        atr_approx = sum(abs(closes[i]-closes[i-1]) for i in range(n-9,n)) / 9
+        if rally > 2 and consol < atr_approx * 4:
+            patterns.append({"name":"Bull Flag","bias":"BULLISH","desc":f"Strong rally (+{round(rally,1)}%) followed by tight consolidation — continuation likely"})
+
+    return patterns
+
+
+def get_key_levels(candles):
+    """Find key support/resistance, 24h high/low, weekly levels."""
+    closes = [c["close"] for c in candles]
+    highs  = [c["high"]  for c in candles]
+    lows   = [c["low"]   for c in candles]
+    price  = closes[-1]
+
+    # 24h high/low (96 x 15m candles)
+    d1_highs = highs[-96:]; d1_lows = lows[-96:]
+    d1_high  = max(d1_highs); d1_low = min(d1_lows)
+
+    # Weekly high/low (672 x 15m = 7 days)
+    wk_highs = highs[-min(672,len(highs)):]; wk_lows = lows[-min(672,len(lows)):]
+    wk_high  = max(wk_highs); wk_low = min(wk_lows)
+
+    # Pivot point (classic)
+    prev_h = max(highs[-2:-1] or [price])
+    prev_l = min(lows[-2:-1]  or [price])
+    prev_c = closes[-2] if len(closes) > 1 else price
+    pivot  = (prev_h + prev_l + prev_c) / 3
+    r1     = 2 * pivot - prev_l
+    s1     = 2 * pivot - prev_h
+    r2     = pivot + (prev_h - prev_l)
+    s2     = pivot - (prev_h - prev_l)
+
+    # Distance from key levels
+    def pct_from(level): return round((level - price) / price * 100, 2)
+
+    return {
+        "price":     round(price, 2),
+        "d1_high":   round(d1_high, 2),  "d1_high_pct":  pct_from(d1_high),
+        "d1_low":    round(d1_low, 2),   "d1_low_pct":   pct_from(d1_low),
+        "wk_high":   round(wk_high, 2),  "wk_high_pct":  pct_from(wk_high),
+        "wk_low":    round(wk_low, 2),   "wk_low_pct":   pct_from(wk_low),
+        "pivot":     round(pivot, 2),    "pivot_pct":    pct_from(pivot),
+        "r1":        round(r1, 2),       "r1_pct":       pct_from(r1),
+        "r2":        round(r2, 2),       "r2_pct":       pct_from(r2),
+        "s1":        round(s1, 2),       "s1_pct":       pct_from(s1),
+        "s2":        round(s2, 2),       "s2_pct":       pct_from(s2),
+    }
+
+
+def get_market_summary(candles, ind):
+    """Overall market health score and plain-English summary."""
+    n     = len(candles) - 1
+    price = candles[n]["close"]
+    rsi   = ind["rsi"][n]
+    adx   = ind["adx"][n]
+    e9    = ind["ema9"][n]; e21 = ind["ema21"][n]; e50 = ind["ema50"][n]
+    macd  = ind["macd"][n]; msig = ind["macd_signal"][n]
+    vol   = ind["volumes"][n]; vol_ma = ind["vol_ma"][n]
+
+    # Trend direction
+    if e9 and e21 and e50 and e9 > e21 and price > e50:
+        trend = "BULLISH"; trend_color = "green"
+    elif e9 and e21 and e50 and e9 < e21 and price < e50:
+        trend = "BEARISH"; trend_color = "red"
+    else:
+        trend = "NEUTRAL"; trend_color = "yellow"
+
+    # Momentum
+    if rsi and rsi > 55 and macd and macd > msig:
+        momentum = "STRONG BULLISH"
+    elif rsi and rsi < 45 and macd and macd < msig:
+        momentum = "STRONG BEARISH"
+    elif rsi and rsi > 50:
+        momentum = "MILD BULLISH"
+    elif rsi and rsi < 50:
+        momentum = "MILD BEARISH"
+    else:
+        momentum = "NEUTRAL"
+
+    # Regime
+    if adx and adx > 30:  regime = "STRONG TREND"
+    elif adx and adx > 20: regime = "TRENDING"
+    else:                  regime = "RANGING / CHOPPY"
+
+    # Volume
+    vol_status = "HIGH" if vol and vol_ma and vol > vol_ma*1.2 else \
+                 "LOW"  if vol and vol_ma and vol < vol_ma*0.8 else "AVERAGE"
+
+    # Price change
+    c1h  = candles[n-4]["close"]  if n >= 4  else price
+    c4h  = candles[n-16]["close"] if n >= 16 else price
+    c24h = candles[n-96]["close"] if n >= 96 else price
+    pct1h  = round((price-c1h) /c1h *100, 2)
+    pct4h  = round((price-c4h) /c4h *100, 2)
+    pct24h = round((price-c24h)/c24h*100, 2)
+
+    return {
+        "trend": trend, "trend_color": trend_color,
+        "momentum": momentum, "regime": regime, "volume": vol_status,
+        "price_change": {"1h": pct1h, "4h": pct4h, "24h": pct24h},
+        "rsi": r2(rsi), "adx": r2(adx),
+    }
+
+
+@app.get("/analysis")
+def get_analysis():
+    try:
+        candles = fetch_candles(limit=200)
+        ind     = compute_indicators(candles)
+        fng, flab = get_fear_greed()
+        htf     = get_htf_trend()
+
+        patterns = detect_chart_patterns(candles)
+        levels   = get_key_levels(candles)
+        summary  = get_market_summary(candles, ind)
+
+        n = len(candles) - 1
+        price = candles[n]["close"]
+
+        # Recent price history (last 24 closes, every 4 candles = 1h intervals)
+        history = [{"time": candles[i]["open_time"],
+                    "price": round(candles[i]["close"], 2)}
+                   for i in range(max(0, n-96), n+1, 4)]
+
+        return {
+            "ok": True,
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+            "price": round(price, 2),
+            "summary": summary,
+            "patterns": patterns,
+            "levels": levels,
+            "fear_greed": {"value": fng, "label": flab},
+            "htf_trend": htf,
+            "price_history": history,
+            "rsi":  r2(ind["rsi"][n]),
+            "adx":  r2(ind["adx"][n]),
+            "atr":  r2(ind["atr"][n]),
+            "ema9": r2(ind["ema9"][n]),
+            "ema21":r2(ind["ema21"][n]),
+            "ema50":r2(ind["ema50"][n]),
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
